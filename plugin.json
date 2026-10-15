@@ -1,8 +1,8 @@
 {
 	"name": "WikiSync",
 	"version": "1.0",
-	"contactEmailAddress": "admin@weirdgloop.org",
-	"requiredPermissions": [],
-	"optionalPermissions": [ "httpAccess", "trackingAccess" ],
+	"contactEmailAddress": "support@weirdgloop.org",
+	"requiredPermissions": [ "httpAccess" ],
+	"optionalPermissions": [],
 	"urls": { "wikisync": "http://localhost:3000" }
 }

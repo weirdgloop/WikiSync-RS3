@@ -20,7 +20,6 @@ function Manager:init()
     self.ticksSinceLastManifestCheck = 0
 
     self.isSubmitting = false
-    self.isFetchingManifest = false
 
     -- Using server tick instead of client tick to reduce overhead
     Event.ServerLogic.Subscribe(LOGIC_EVENT_NAME, function()
@@ -49,51 +48,56 @@ end
 
 -- Does the main work for gathering and submitting the data
 function Manager:DoSync()
-    self.ticksSinceLastSubmissionAttempt = 0
+    local ok, err = pcall(function ()
+        self.ticksSinceLastSubmissionAttempt = 0
 
-    if self.isSubmitting then
-        -- Make sure that we don't keep trying to submit if we're already trying
-        return
+        if self.isSubmitting then
+            -- Make sure that we don't keep trying to submit if we're already trying
+            return
+        end
+
+        if not Player.IsAvailable() then
+            return
+        end
+
+        if not self.manifest or next(self.manifest) == nil then
+            log("Not submitting due to missing or invalid manifest")
+            return
+        end
+
+        local username = Player.GetEntity().displayName
+        local newPlayerData = self:GetPlayerData()
+
+        Utils:subtract(newPlayerData, self.oldPlayerData)
+        if Utils:playerDataIsEmpty(newPlayerData) then
+            log("Doing nothing - no changes")
+            return
+        end
+
+        self:SubmitData(username, 'STANDARD', newPlayerData, self.oldPlayerData)
+    end)
+
+    if not ok then
+        log("DoSync error: " .. tostring(err))
+        -- On error, reset isSubmitting always
+        self.isSubmitting = false
     end
-
-    if not Player.IsAvailable() then
-        return
-    end
-
-    if not self.manifest or next(self.manifest) == nil then
-        log("Not submitting due to missing or invalid manifest")
-        return
-    end
-
-    local username = Player.GetEntity().displayName
-    local newPlayerData = self:GetPlayerData()
-
-    Utils:subtract(newPlayerData, self.oldPlayerData)
-    if Utils:playerDataIsEmpty(newPlayerData) then
-        log("Doing nothing - no changes")
-        return
-    end
-
-    self:SubmitData(username, 'STANDARD', newPlayerData, self.oldPlayerData)
 end
 
 -- Get the current player data
 function Manager:GetPlayerData()
     local data = Utils:newPlayerData()
 
-    missingVarps = {}
-    missingVarbs = {}
+    local missingVarps = {}
+    local missingVarbs = {}
 
     for ix, vp in ipairs(self.manifest.varps) do
         local varp = var.VarPlayer.FromID(vp)
-        if not varp then
+        if varp then
+            data.varp[tostring(vp)] = varp.value
+        else
             table.insert(missingVarps, vp)
-            goto continue
         end
-
-        data.varp[tostring(vp)] = varp.value
-
-        ::continue::
     end
 
     if next(missingVarps) ~= nil then
@@ -102,17 +106,14 @@ function Manager:GetPlayerData()
 
     -- varbits are still VarPlayers, but in the client API, they use negative integers and are offset by one
     for ix, vb in ipairs(self.manifest.varbits) do
-        new_vb = -(vb + 1)
+        local new_vb = -(vb + 1)
 
         local varb = var.VarPlayer.FromID(new_vb)
-        if not varb then
+        if varb then
+            data.varbit[tostring(vb)] = varb.value
+        else
             table.insert(missingVarbs, vb)
-            goto continue
         end
-
-        data.varbit[tostring(vb)] = varb.value
-
-        ::continue::
     end
 
     if next(missingVarbs) ~= nil then
@@ -140,16 +141,15 @@ function Manager:SubmitData(username, profileType, delta, old)
         return
     end
 
-    self.isSubmitting = true
-
     local submission = {
         username = username,
         profile = profileType,
         data = delta
     }
     log("Attempting submission for " .. username)
-    req = HTTPRequest.new(Plugin.urls.wikisync, SUBMIT_URL_PATH)
+    local req = HTTPRequest.new(Plugin.urls.wikisync, SUBMIT_URL_PATH)
     req:AddHeader("Content-Type", "application/json")
+    self.isSubmitting = true
     req:Post(json.encode(submission), function (req)
         self.isSubmitting = false
 
@@ -158,7 +158,7 @@ function Manager:SubmitData(username, profileType, delta, old)
             self.cyclesSinceSuccessfulCall = 0
             Utils:merge(old, delta)
         else
-            log("Failed to submit data: response code " .. req.responseCode)
+            log("Failed to submit data: response code " .. tostring(req.responseCode))
         end
     end)
 end
@@ -167,12 +167,31 @@ function Manager:UpdateManifest()
     log("Fetching remote manifest")
     HTTPRequest.new(Plugin.urls.wikisync, MANIFEST_URL_PATH)
         :Get(function (req)
+            local function retrySooner()
+                self.ticksSinceLastManifestCheck = (SECONDS_BETWEEN_MANIFEST_CHECKS - 60) / 0.6
+            end
+
             if not req.successful or not req.data then
-                log("Problem fetching manifest: response code " .. req.responseCode)
+                log("Problem fetching manifest: response code " .. tostring(req.responseCode))
+                retrySooner()
                 return
             end
 
-            self.manifest = json.decode(req.data)
+            local ok, decodedOrErr = pcall(json.decode, req.data)
+            if not ok then
+                log("Manifest could not decode correctly: " .. tostring(decodedOrErr))
+                retrySooner()
+                return
+            end
+
+            if type(decodedOrErr) ~= "table" or type(decodedOrErr.varps) ~= "table"
+                or type(decodedOrErr.varbits) ~= "table" then
+                log("Manifest is an incorrect shape or missing expected keys")
+                retrySooner()
+                return
+            end
+
+            self.manifest = decodedOrErr
             log("Successfully fetched manifest")
         end)
 end
