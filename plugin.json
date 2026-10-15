@@ -4,5 +4,5 @@
 	"contactEmailAddress": "support@weirdgloop.org",
 	"requiredPermissions": [ "httpAccess" ],
 	"optionalPermissions": [],
-	"urls": { "wikisync": "http://localhost:3000" }
+	"urls": { "wikisync": "https://sync.runescape.wiki" }
 }

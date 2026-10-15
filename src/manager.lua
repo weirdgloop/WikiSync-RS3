@@ -10,6 +10,7 @@ local SECONDS_BETWEEN_UPLOADS = 10
 local SECONDS_BETWEEN_MANIFEST_CHECKS = 1200
 local MANIFEST_URL_PATH = "/runescape/manifest"
 local SUBMIT_URL_PATH = "/runescape/submit"
+local USER_AGENT = "WikiSync-RS3/1.0"
 
 function Manager:init()
     self.manifest = {}
@@ -149,6 +150,7 @@ function Manager:SubmitData(username, profileType, delta, old)
     log("Attempting submission for " .. username)
     local req = HTTPRequest.new(Plugin.urls.wikisync, SUBMIT_URL_PATH)
     req:AddHeader("Content-Type", "application/json")
+    req:AddHeader("User-Agent", USER_AGENT)
     self.isSubmitting = true
     req:Post(json.encode(submission), function (req)
         self.isSubmitting = false
@@ -165,35 +167,36 @@ end
 
 function Manager:UpdateManifest()
     log("Fetching remote manifest")
-    HTTPRequest.new(Plugin.urls.wikisync, MANIFEST_URL_PATH)
-        :Get(function (req)
-            local function retrySooner()
-                self.ticksSinceLastManifestCheck = (SECONDS_BETWEEN_MANIFEST_CHECKS - 60) / 0.6
-            end
+    local req = HTTPRequest.new(Plugin.urls.wikisync, MANIFEST_URL_PATH)
+    req:AddHeader("User-Agent", USER_AGENT)
+    req:Get(function (req)
+        local function retrySooner()
+            self.ticksSinceLastManifestCheck = (SECONDS_BETWEEN_MANIFEST_CHECKS - 60) / 0.6
+        end
 
-            if not req.successful or not req.data then
-                log("Problem fetching manifest: response code " .. tostring(req.responseCode))
-                retrySooner()
-                return
-            end
+        if not req.successful or not req.data then
+            log("Problem fetching manifest: response code " .. tostring(req.responseCode))
+            retrySooner()
+            return
+        end
 
-            local ok, decodedOrErr = pcall(json.decode, req.data)
-            if not ok then
-                log("Manifest could not decode correctly: " .. tostring(decodedOrErr))
-                retrySooner()
-                return
-            end
+        local ok, decodedOrErr = pcall(json.decode, req.data)
+        if not ok then
+            log("Manifest could not decode correctly: " .. tostring(decodedOrErr))
+            retrySooner()
+            return
+        end
 
-            if type(decodedOrErr) ~= "table" or type(decodedOrErr.varps) ~= "table"
-                or type(decodedOrErr.varbits) ~= "table" then
-                log("Manifest is an incorrect shape or missing expected keys")
-                retrySooner()
-                return
-            end
+        if type(decodedOrErr) ~= "table" or type(decodedOrErr.varps) ~= "table"
+            or type(decodedOrErr.varbits) ~= "table" then
+            log("Manifest is an incorrect shape or missing expected keys")
+            retrySooner()
+            return
+        end
 
-            self.manifest = decodedOrErr
-            log("Successfully fetched manifest")
-        end)
+        self.manifest = decodedOrErr
+        log("Successfully fetched manifest")
+    end)
 end
 
 return Manager
