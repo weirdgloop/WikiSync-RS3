@@ -71,7 +71,6 @@ function Manager:DoSync()
 
         Utils:subtract(newPlayerData, self.oldPlayerData)
         if Utils:playerDataIsEmpty(newPlayerData) then
-            log("Doing nothing - no changes")
             return
         end
 
@@ -147,7 +146,6 @@ function Manager:SubmitData(username, profileType, delta, old)
         profile = profileType,
         data = delta
     }
-    log("Attempting submission for " .. username)
     local req = HTTPRequest.new(Plugin.urls.wikisync, SUBMIT_URL_PATH)
     req:AddHeader("Content-Type", "application/json")
     req:AddHeader("User-Agent", USER_AGENT)
@@ -156,7 +154,6 @@ function Manager:SubmitData(username, profileType, delta, old)
         self.isSubmitting = false
 
         if req.successful then
-            log("Successfully submitted data")
             self.cyclesSinceSuccessfulCall = 0
             Utils:merge(old, delta)
         else
@@ -166,7 +163,6 @@ function Manager:SubmitData(username, profileType, delta, old)
 end
 
 function Manager:UpdateManifest()
-    log("Fetching remote manifest")
     local req = HTTPRequest.new(Plugin.urls.wikisync, MANIFEST_URL_PATH)
     req:AddHeader("User-Agent", USER_AGENT)
     req:Get(function (req)
@@ -195,7 +191,6 @@ function Manager:UpdateManifest()
         end
 
         self.manifest = decodedOrErr
-        log("Successfully fetched manifest")
     end)
 end
 
