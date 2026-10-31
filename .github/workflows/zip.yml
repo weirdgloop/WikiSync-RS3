@@ -1,0 +1,19 @@
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Zip files
+        run: |
+          zip -r WikiSync.zip main.lua plugin.json src
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: WikiSync.zip
+          archive: false
