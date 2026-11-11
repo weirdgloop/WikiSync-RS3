@@ -129,6 +129,11 @@ function Manager:GetPlayerData()
         data.level[skillName] = skillLevel
     end
 
+    -- Get all achievement completion states
+    for k, v in pairs(config.Achievement) do
+        data.ach[tostring(k)] = (v.progress == -2) and 1 or 0
+    end
+
     return data
 end
 

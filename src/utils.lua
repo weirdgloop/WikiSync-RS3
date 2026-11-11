@@ -13,6 +13,7 @@ function Utils:subtract(newData, oldData)
     subtractSubtable(newData.varbit, oldData.varbit)
     subtractSubtable(newData.varp, oldData.varp)
     subtractSubtable(newData.level, oldData.level)
+    subtractSubtable(newData.ach, oldData.ach)
 end
 
 function Utils:merge(oldData, delta)
@@ -26,14 +27,15 @@ function Utils:merge(oldData, delta)
     mergeSubtable(oldData.varbit, delta.varbit)
     mergeSubtable(oldData.varp, delta.varp)
     mergeSubtable(oldData.level, delta.level)
+    mergeSubtable(oldData.ach, delta.ach)
 end
 
 function Utils:newPlayerData()
-    return { varbit = {}, varp = {}, level = {} }
+    return { varbit = {}, varp = {}, level = {}, ach = {} }
 end
 
 function Utils:playerDataIsEmpty(data)
-    return next(data.varbit) == nil and next(data.varp) == nil and next(data.level) == nil
+    return next(data.varbit) == nil and next(data.varp) == nil and next(data.level) == nil and next(data.ach) == nil
 end
 
 return Utils
