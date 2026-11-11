@@ -129,6 +129,11 @@ function Manager:GetPlayerData()
         data.level[skillName] = skillLevel
     end
 
+    -- Get all achievement progress states
+    for k, v in pairs(config.Achievement) do
+        data.ach[tostring(k)] = v.progress
+    end
+
     return data
 end
 
