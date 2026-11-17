@@ -7,33 +7,55 @@ local LOGIC_EVENT_NAME = "wikisync_logic"
 local GAME_STATE_EVENT_NAME = "wikisync_gamestate"
 
 local SECONDS_BETWEEN_UPLOADS = 10
+local CLIENT_TICKS_BETWEEN_UPLOADS = (SECONDS_BETWEEN_UPLOADS * 50)
+
 local SECONDS_BETWEEN_MANIFEST_CHECKS = 1200
+local CLIENT_TICKS_BETWEEN_MANIFEST_CHECKS = (SECONDS_BETWEEN_MANIFEST_CHECKS * 50)
+
 local MANIFEST_URL_PATH = "/runescape/manifest"
 local SUBMIT_URL_PATH = "/runescape/submit"
-local USER_AGENT = "WikiSync-RS3/1.0"
+local USER_AGENT = "WikiSync-RS3/1.1.1"
 
 function Manager:init()
     self.manifest = {}
     self.oldPlayerData = Utils:newPlayerData()
 
     self.cyclesSinceSuccessfulCall = 0
-    self.ticksSinceLastSubmissionAttempt = 0
-    self.ticksSinceLastManifestCheck = 0
+    self.nextManifestCheckClientTick = 0
+    self.nextSubmissionClientTick = 0
+    self.currentClientTick = 0
 
     self.isSubmitting = false
 
-    -- Using server tick instead of client tick to reduce overhead
-    Event.ServerLogic.Subscribe(LOGIC_EVENT_NAME, function()
-        self.ticksSinceLastManifestCheck = self.ticksSinceLastManifestCheck + 1
+    self.currentAchievementData = {}
+    self.achievementBuckets = {}
 
-        if not self.isSubmitting and self.ticksSinceLastSubmissionAttempt >= (SECONDS_BETWEEN_UPLOADS / 0.6) then
-            self:DoSync()
-        else
-            self.ticksSinceLastSubmissionAttempt = self.ticksSinceLastSubmissionAttempt + 1
+    -- Get all achievement IDs and separate them into buckets. Reading all achievement progress at once can cause
+    -- client stutters because the API is not asynchronous, so spread them out over client ticks instead
+    for achievementId, name in pairs(id.Achievement) do
+        local bucket = achievementId % CLIENT_TICKS_BETWEEN_UPLOADS
+        if self.achievementBuckets[bucket] == nil then
+            self.achievementBuckets[bucket] = {}
+        end
+        table.insert(self.achievementBuckets[bucket], achievementId)
+    end
+
+    Event.Logic.Subscribe(LOGIC_EVENT_NAME, function (logicEvent)
+        self.currentClientTick = logicEvent.logicTick
+        if self.nextSubmissionClientTick == 0 then
+            self.nextSubmissionClientTick = self.currentClientTick + CLIENT_TICKS_BETWEEN_UPLOADS
         end
 
-        if self.ticksSinceLastManifestCheck >= (SECONDS_BETWEEN_MANIFEST_CHECKS / 0.6) then
-            self.ticksSinceLastManifestCheck = 0
+        local bucket = self.achievementBuckets[self.currentClientTick % CLIENT_TICKS_BETWEEN_UPLOADS]
+        if bucket ~= nil then
+            self:FetchAchievementData(bucket)
+        end
+
+        if not self.isSubmitting and self.currentClientTick >= self.nextSubmissionClientTick then
+            self:DoSync()
+        end
+
+        if self.currentClientTick >= self.nextManifestCheckClientTick then
             self:UpdateManifest()
         end
     end)
@@ -43,14 +65,12 @@ function Manager:init()
             self:DoSync()
         end
     end)
-
-    self:UpdateManifest()
 end
 
 -- Does the main work for gathering and submitting the data
 function Manager:DoSync()
     local ok, err = pcall(function ()
-        self.ticksSinceLastSubmissionAttempt = 0
+        self.nextSubmissionClientTick = self.currentClientTick + CLIENT_TICKS_BETWEEN_UPLOADS
 
         if self.isSubmitting then
             -- Make sure that we don't keep trying to submit if we're already trying
@@ -68,6 +88,12 @@ function Manager:DoSync()
 
         local username = Player.GetEntity().displayName
         local newPlayerData = self:GetPlayerData()
+
+        -- Clone self.currentAchievementData otherwise it could mutate while the HTTP call is in flight
+        newPlayerData.ach = {}
+        for k, v in pairs(self.currentAchievementData) do
+            newPlayerData.ach[k] = v
+        end
 
         Utils:subtract(newPlayerData, self.oldPlayerData)
         if Utils:playerDataIsEmpty(newPlayerData) then
@@ -129,12 +155,17 @@ function Manager:GetPlayerData()
         data.level[skillName] = skillLevel
     end
 
-    -- Get all achievement progress states
-    for k, v in pairs(config.Achievement) do
-        data.ach[tostring(k)] = v.progress
-    end
-
     return data
+end
+
+-- Fetch the current progress of a range of achievements
+function Manager:FetchAchievementData(achievementIds)
+    for _, id in ipairs(achievementIds) do
+        local v = config.Achievement.FromID(id)
+        if v then
+            self.currentAchievementData[tostring(id)] = v.progress
+        end
+    end
 end
 
 -- Actually submit the data to our endpoint
@@ -168,11 +199,12 @@ function Manager:SubmitData(username, profileType, delta, old)
 end
 
 function Manager:UpdateManifest()
+    self.nextManifestCheckClientTick = self.currentClientTick + CLIENT_TICKS_BETWEEN_MANIFEST_CHECKS
     local req = HTTPRequest.new(Plugin.urls.wikisync, MANIFEST_URL_PATH)
     req:AddHeader("User-Agent", USER_AGENT)
     req:Get(function (req)
         local function retrySooner()
-            self.ticksSinceLastManifestCheck = (SECONDS_BETWEEN_MANIFEST_CHECKS - 60) / 0.6
+            self.nextManifestCheckClientTick = self.currentClientTick + (60 * 50)
         end
 
         if not req.successful or not req.data then
